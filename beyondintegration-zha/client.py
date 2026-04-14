@@ -124,8 +124,8 @@ def parse_state_value(state: str) -> float | None:
 
 
 def states_to_points(states: list[dict], include_domains: list[str],
-                     exclude_entities: list[str], influx_bucket: str,
-                     gateway_name: str) -> list:
+                     exclude_entities: list[str], include_entities: list[str],
+                     influx_bucket: str, gateway_name: str) -> list:
     points = []
     for s in states:
         entity_id = s.get("entity_id", "")
@@ -134,6 +134,9 @@ def states_to_points(states: list[dict], include_domains: list[str],
         if domain not in include_domains:
             continue
         if entity_id in exclude_entities:
+            continue
+        # Wenn include_entities gesetzt: nur diese erlauben (Whitelist)
+        if include_entities and entity_id not in include_entities:
             continue
 
         state_val = s.get("state", "")
@@ -202,11 +205,12 @@ def main() -> None:
     management_url = options.get("management_url", "https://app.beyondbuildings.de").rstrip("/")
     gateway_name   = options["gateway_name"]
     poll_interval  = int(options.get("poll_interval", 60))
-    include_domains = [d.strip() for d in options.get("include_domains", "sensor,binary_sensor").split(",") if d.strip()]
+    include_domains  = [d.strip() for d in options.get("include_domains", "sensor,binary_sensor").split(",") if d.strip()]
     exclude_entities = [e.strip() for e in options.get("exclude_entities", "").split(",") if e.strip()]
+    include_entities = [e.strip() for e in options.get("include_entities", "").split(",") if e.strip()]
 
-    log.info("Gateway: %s | Management: %s | Domains: %s",
-             gateway_name, management_url, include_domains)
+    log.info("Gateway: %s | Management: %s | Domains: %s | Whitelist: %d entities",
+             gateway_name, management_url, include_domains, len(include_entities))
 
     # ── Registration ──────────────────────────────────────────────────────────
     api_key: str | None = None
@@ -246,7 +250,7 @@ def main() -> None:
         try:
             states = get_ha_states()
             points = states_to_points(states, include_domains, exclude_entities,
-                                      influx["influx_bucket"], gateway_name)
+                                      include_entities, influx["influx_bucket"], gateway_name)
             if points:
                 write_to_influx(points, influx)
             else:
