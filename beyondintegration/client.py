@@ -98,7 +98,7 @@ def send_heartbeat(management_url: str, api_key: str) -> dict:
         json={
             "firmware_version": "beyondintegration-1.0.0",
             "ip_local":         get_local_ip(),
-            "uptime_seconds":   None,
+            "uptime_seconds":   0,
         },
         timeout=15,
     )
