@@ -49,6 +49,12 @@ def get_device_id() -> str:
     return f"BB-ZHA-{socket.gethostname().upper()}"
 
 
+def get_mac_from_device_id(device_id: str) -> str:
+    import hashlib
+    h = hashlib.md5(device_id.encode()).hexdigest()
+    return ":".join(h[i:i+2] for i in range(0, 12, 2))
+
+
 def get_local_ip() -> str | None:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -69,7 +75,7 @@ def register(management_url: str, gateway_name: str) -> str:
         f"{management_url}/api/v1/devices/register",
         json={
             "serial_number": device_id,
-            "mac_address":   "00:00:00:00:00:00",
+            "mac_address":   get_mac_from_device_id(device_id),
             "gateway_name":  gateway_name,
             "type":          "ha_addon_zha",
         },
