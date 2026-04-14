@@ -173,7 +173,7 @@ def states_to_points(states: list[dict], include_domains: list[str],
             .tag("apartment",    influx_bucket)
             .tag("gateway",      gateway_name)
             .field("value",      numeric)
-            .time(ts, WritePrecision.SECONDS)
+            .time(ts, WritePrecision.S)
         )
         points.append(point)
 
