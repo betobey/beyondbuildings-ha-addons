@@ -1,0 +1,36 @@
+name: "Beyond Integration (ZHA)"
+description: >
+  Verbindet ZHA/native HA-Sensoren mit der BeyondBox-Plattform.
+  Liest States direkt aus Home Assistant und schreibt sie in InfluxDB 2.
+  Für Wohnungen die ZHA oder andere native HA-Integrationen nutzen (kein Zigbee2MQTT).
+version: "1.0.0"
+slug: "beyondintegration_zha"
+init: false
+run_as_root: true
+host_network: true
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+
+startup: application
+boot: auto
+
+map:
+  - data
+
+options:
+  gateway_name: "Mein Zuhause"
+  management_url: "https://app.beyondbuildings.de"
+  include_domains: "sensor,binary_sensor,climate,cover"
+  exclude_entities: ""
+  poll_interval: 60
+
+schema:
+  gateway_name: str
+  management_url: str
+  include_domains: str
+  exclude_entities: str
+  poll_interval: int
