@@ -2,10 +2,11 @@ name: "Beyond Integration"
 description: >
   Verbindet Zigbee-Sensoren (via Zigbee2MQTT + Mosquitto) mit der BeyondBox-Plattform.
   Schreibt Sensordaten direkt in InfluxDB 2 (Token-Auth, org/bucket).
-version: "1.0.7"
+version: "1.0.8"
 slug: "beyondintegration"
 init: false
 run_as_root: true
+host_network: true
 
 arch:
   - aarch64
