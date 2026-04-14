@@ -222,14 +222,15 @@ def main() -> None:
     while influx is None:
         try:
             hb = send_heartbeat(management_url, api_key)
-            if hb.get("influx_url") and hb.get("influx_token"):
+            if hb.get("influx_v2_url") and hb.get("influx_token"):
                 influx = {
-                    "influx_url":    hb["influx_url"],
+                    "influx_url":    hb["influx_v2_url"],
                     "influx_token":  hb["influx_token"],
                     "influx_org":    hb.get("influx_org", "beyondbuildings"),
                     "influx_bucket": hb["influx_bucket"],
                 }
-                log.info("InfluxDB v2 credentials received — bucket=%s", influx["influx_bucket"])
+                log.info("InfluxDB v2 credentials received — url=%s bucket=%s",
+                         influx["influx_url"], influx["influx_bucket"])
             else:
                 log.info("Device not yet assigned to a unit — retrying in 30s")
                 time.sleep(30)
@@ -271,6 +272,8 @@ def main() -> None:
                     influx["influx_token"]  = hb["influx_token"]
                     influx["influx_org"]    = hb.get("influx_org", influx["influx_org"])
                     influx["influx_bucket"] = hb.get("influx_bucket", influx["influx_bucket"])
+                    if hb.get("influx_v2_url"):
+                        influx["influx_url"] = hb["influx_v2_url"]
                     log.info("InfluxDB credentials updated")
 
             except requests.HTTPError as e:
