@@ -9,6 +9,8 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+USER root
+
 WORKDIR /app
 COPY telegraf.conf.tpl .
 COPY client.py .
