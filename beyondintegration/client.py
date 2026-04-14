@@ -22,9 +22,9 @@ import requests
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 OPTIONS_FILE  = Path("/data/options.json")
-API_KEY_FILE  = Path("/data/config/bb_api_key")
-INFLUX_CACHE  = Path("/data/config/bb_influx_cache.json")
-TELEGRAF_CONF = Path("/data/config/telegraf.conf")
+API_KEY_FILE  = Path("/data/bb_api_key")
+INFLUX_CACHE  = Path("/data/bb_influx_cache.json")
+TELEGRAF_CONF = Path("/data/telegraf.conf")
 TELEGRAF_TPL  = Path("/app/telegraf.conf.tpl")
 
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "60"))
@@ -80,7 +80,6 @@ def load_api_key() -> str | None:
 
 
 def save_api_key(key: str) -> None:
-    API_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
     API_KEY_FILE.write_text(key)
     API_KEY_FILE.chmod(0o600)
     log.info("API key saved: %s", API_KEY_FILE)
@@ -145,7 +144,6 @@ def render_telegraf_conf(options: dict, influx: dict) -> None:
     for key, val in replacements.items():
         conf = conf.replace(f"{{{{{key}}}}}", val)
 
-    TELEGRAF_CONF.parent.mkdir(parents=True, exist_ok=True)
     TELEGRAF_CONF.write_text(conf)
     log.info("telegraf.conf rendered → %s", TELEGRAF_CONF)
 
@@ -178,7 +176,6 @@ def load_influx_cache() -> dict:
 
 
 def save_influx_cache(data: dict) -> None:
-    INFLUX_CACHE.parent.mkdir(parents=True, exist_ok=True)
     INFLUX_CACHE.write_text(json.dumps(data))
 
 
