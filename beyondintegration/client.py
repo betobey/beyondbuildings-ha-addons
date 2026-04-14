@@ -39,6 +39,16 @@ log = logging.getLogger("beyondintegration")
 # ── Options ────────────────────────────────────────────────────────────────────
 
 def load_options() -> dict:
+    """Liest Add-on-Optionen via Supervisor API (bevorzugt) oder Datei-Fallback."""
+    supervisor_token = os.environ.get("SUPERVISOR_TOKEN")
+    if supervisor_token:
+        resp = requests.get(
+            "http://supervisor/addons/self/options/config",
+            headers={"Authorization": f"Bearer {supervisor_token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()["data"]
     return json.loads(OPTIONS_FILE.read_text())
 
 # ── Device Identity ────────────────────────────────────────────────────────────
