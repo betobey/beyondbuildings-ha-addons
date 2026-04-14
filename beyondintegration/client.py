@@ -22,9 +22,7 @@ import requests
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 OPTIONS_FILE  = Path("/data/options.json")
-API_KEY_FILE  = Path("/data/bb_api_key")
-INFLUX_CACHE  = Path("/data/bb_influx_cache.json")
-TELEGRAF_CONF = Path("/data/telegraf.conf")
+TELEGRAF_CONF = Path("/tmp/telegraf.conf")
 TELEGRAF_TPL  = Path("/app/telegraf.conf.tpl")
 
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "60"))
@@ -70,19 +68,6 @@ def get_local_ip() -> str | None:
         return ip
     except Exception:
         return None
-
-# ── API Key Persistence ────────────────────────────────────────────────────────
-
-def load_api_key() -> str | None:
-    if API_KEY_FILE.exists():
-        return API_KEY_FILE.read_text().strip() or None
-    return None
-
-
-def save_api_key(key: str) -> None:
-    API_KEY_FILE.write_text(key)
-    API_KEY_FILE.chmod(0o600)
-    log.info("API key saved: %s", API_KEY_FILE)
 
 # ── Registration ───────────────────────────────────────────────────────────────
 
@@ -166,17 +151,16 @@ def reload_telegraf() -> None:
 
 # ── InfluxDB Cache ─────────────────────────────────────────────────────────────
 
+_influx_cache: dict = {}
+
+
 def load_influx_cache() -> dict:
-    if INFLUX_CACHE.exists():
-        try:
-            return json.loads(INFLUX_CACHE.read_text())
-        except Exception:
-            pass
-    return {}
+    return _influx_cache
 
 
 def save_influx_cache(data: dict) -> None:
-    INFLUX_CACHE.write_text(json.dumps(data))
+    global _influx_cache
+    _influx_cache = data
 
 
 def influx_changed(new: dict, cached: dict) -> bool:
@@ -212,16 +196,13 @@ def main() -> None:
     log.info("Gateway: %s | Management: %s", gateway_name, management_url)
 
     # ── Registration ──────────────────────────────────────────────────────────
-    api_key = load_api_key()
-    if not api_key:
-        while True:
-            try:
-                api_key = register(management_url, gateway_name)
-                save_api_key(api_key)
-                break
-            except Exception as e:
-                log.error("Registration failed: %s — retrying in 30s", e)
-                time.sleep(30)
+    api_key: str | None = None
+    while api_key is None:
+        try:
+            api_key = register(management_url, gateway_name)
+        except Exception as e:
+            log.error("Registration failed: %s — retrying in 30s", e)
+            time.sleep(30)
 
     # ── Initial heartbeat → get InfluxDB v2 credentials ──────────────────────
     log.info("Fetching initial configuration from platform...")
@@ -268,8 +249,7 @@ def main() -> None:
 
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 401:
-                log.error("API key invalid — clearing for re-registration on next start")
-                API_KEY_FILE.unlink(missing_ok=True)
+                log.error("API key invalid — exiting for re-registration on next start")
                 return
             log.error("Heartbeat HTTP error: %s", e)
         except Exception as e:
