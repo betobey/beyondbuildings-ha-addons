@@ -49,12 +49,22 @@ def get_device_id() -> str:
     Returns a stable, unique device identifier.
     Uses /etc/machine-id (present on all Linux systems incl. HA OS).
     Prefixed BB-HA- to distinguish from Pi devices (BB-<serial>) in the platform.
+    Falls back to MAC address (same strategy as Pi bb-client).
     """
     machine_id = Path("/etc/machine-id")
     if machine_id.exists():
         mid = machine_id.read_text().strip()[:16].upper()
         return f"BB-HA-{mid}"
-    return f"BB-HA-{socket.gethostname().upper()}"
+    mac = get_mac().replace(":", "")
+    return f"BB-HA-{mac.upper()}"
+
+
+def get_mac() -> str:
+    for iface in ("eth0", "wlan0", "end0"):
+        path = Path(f"/sys/class/net/{iface}/address")
+        if path.exists():
+            return path.read_text().strip()
+    return "00:00:00:00:00:00"
 
 
 def get_local_ip() -> str | None:
@@ -64,6 +74,13 @@ def get_local_ip() -> str | None:
         ip = s.getsockname()[0]
         s.close()
         return ip
+    except Exception:
+        return None
+
+
+def get_uptime() -> int | None:
+    try:
+        return int(float(Path("/proc/uptime").read_text().split()[0]))
     except Exception:
         return None
 
@@ -90,7 +107,7 @@ def register(management_url: str, gateway_name: str) -> str:
         f"{management_url}/api/v1/devices/register",
         json={
             "serial_number": device_id,
-            "mac_address":   "00:00:00:00:00:00",
+            "mac_address":   get_mac(),
             "gateway_name":  gateway_name,
             "type":          "ha_addon",
         },
@@ -110,7 +127,7 @@ def send_heartbeat(management_url: str, api_key: str) -> dict:
         json={
             "firmware_version": "ha-addon-1.0.0",
             "ip_local":         get_local_ip(),
-            "uptime_seconds":   None,
+            "uptime_seconds":   get_uptime(),
         },
         timeout=15,
     )
