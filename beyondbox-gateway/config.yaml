@@ -15,6 +15,9 @@ arch:
 startup: application
 boot: auto
 
+# Allow access to Supervisor API (needed to read options if /data/options.json is not readable)
+auth_api: true
+
 # Persistent storage for API key, InfluxDB cache, rendered telegraf.conf
 map:
   - data

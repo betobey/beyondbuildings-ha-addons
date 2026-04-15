@@ -40,7 +40,20 @@ log = logging.getLogger("beyondbox-gateway")
 # ── Options ────────────────────────────────────────────────────────────────────
 
 def load_options() -> dict:
-    return json.loads(OPTIONS_FILE.read_text())
+    try:
+        return json.loads(OPTIONS_FILE.read_text())
+    except PermissionError:
+        log.warning("/data/options.json not readable — falling back to Supervisor API")
+        token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN")
+        if not token:
+            raise RuntimeError("Cannot read options: PermissionError on file and no SUPERVISOR_TOKEN")
+        resp = requests.get(
+            "http://supervisor/addons/self/options/config",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 # ── Device Identity ────────────────────────────────────────────────────────────
 
