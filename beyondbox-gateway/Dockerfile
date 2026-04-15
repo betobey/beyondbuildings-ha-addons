@@ -18,4 +18,5 @@ COPY requirements.txt .
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
+USER root
 CMD ["/run.sh"]
