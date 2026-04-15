@@ -2,7 +2,7 @@ name: "BeyondBox Gateway"
 description: >
   Verbindet Zigbee-Sensoren (via Zigbee2MQTT + Mosquitto) mit der BeyondBox-Plattform.
   Liest Sensordaten vom lokalen MQTT-Broker und leitet sie an idb.beyondbuildings.de weiter.
-version: "1.0.0"
+version: "1.1.0"
 slug: "beyondbox_gateway"
 init: false
 
