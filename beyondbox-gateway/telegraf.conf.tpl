@@ -106,11 +106,11 @@ def apply(metric):
     return metric
 '''
 
-# ─── Output: BeyondBox remote InfluxDB ───────────────────────────────────────
-[[outputs.influxdb]]
-  urls = ["{{INFLUX_URL}}"]
-  database = "{{INFLUX_DATABASE}}"
-  username = "{{INFLUX_USERNAME}}"
-  password = "{{INFLUX_PASSWORD}}"
+# ─── Output: BeyondBox remote InfluxDB v2 ────────────────────────────────────
+[[outputs.influxdb_v2]]
+  urls = ["{{INFLUX_V2_URL}}"]
+  token = "{{INFLUX_TOKEN}}"
+  organization = "{{INFLUX_ORG}}"
+  bucket = "{{INFLUX_BUCKET}}"
   timeout = "15s"
   metric_buffer_limit = 10000
