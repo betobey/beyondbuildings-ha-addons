@@ -1,5 +1,4 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM python:3.12-slim
 
 # Install telegraf from InfluxData apt repo
 RUN \
@@ -18,7 +17,7 @@ RUN \
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY telegraf.conf.tpl .
 COPY client.py .
