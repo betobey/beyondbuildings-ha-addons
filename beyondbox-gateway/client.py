@@ -156,16 +156,16 @@ def render_telegraf_conf(options: dict, influx: dict) -> None:
     """Renders telegraf.conf.tpl with current MQTT options and InfluxDB credentials."""
     tpl = TELEGRAF_TPL.read_text()
     replacements = {
-        "GATEWAY_NAME":     options["gateway_name"],
-        "MQTT_HOST":        options["mqtt_host"],
-        "MQTT_PORT":        str(options["mqtt_port"]),
-        "MQTT_USERNAME":    options.get("mqtt_username", ""),
-        "MQTT_PASSWORD":    options.get("mqtt_password", ""),
+        "GATEWAY_NAME":      options["gateway_name"],
+        "MQTT_HOST":         options["mqtt_host"],
+        "MQTT_PORT":         str(options["mqtt_port"]),
+        "MQTT_USERNAME":     options.get("mqtt_username", ""),
+        "MQTT_PASSWORD":     options.get("mqtt_password", ""),
         "MQTT_TOPIC_PREFIX": options.get("mqtt_topic_prefix", "zigbee2mqtt"),
-        "INFLUX_URL":       influx.get("influx_url", ""),
-        "INFLUX_DATABASE":  influx.get("influx_db", "sensors"),
-        "INFLUX_USERNAME":  influx.get("influx_user", ""),
-        "INFLUX_PASSWORD":  influx.get("influx_password", ""),
+        "INFLUX_V2_URL":     influx.get("influx_v2_url", ""),
+        "INFLUX_TOKEN":      influx.get("influx_token", ""),
+        "INFLUX_ORG":        influx.get("influx_org", "beyond"),
+        "INFLUX_BUCKET":     influx.get("influx_bucket", "sensors"),
     }
     conf = tpl
     for key, val in replacements.items():
@@ -211,13 +211,13 @@ def save_influx_cache(data: dict) -> None:
 def influx_changed(new: dict, cached: dict) -> bool:
     return any(
         new.get(k) != cached.get(k)
-        for k in ("influx_url", "influx_db", "influx_user", "influx_password")
+        for k in ("influx_v2_url", "influx_token", "influx_org", "influx_bucket")
     )
 
 
 def update_influx_if_changed(heartbeat: dict, options: dict) -> None:
-    if not heartbeat.get("influx_url"):
-        log.info("No InfluxDB credentials yet — device not assigned to a unit in the platform")
+    if not heartbeat.get("influx_token"):
+        log.info("No InfluxDB v2 credentials yet — device not assigned to a unit in the platform")
         return
 
     cached = load_influx_cache()
@@ -264,9 +264,9 @@ def main() -> None:
 
     # ── Start Telegraf ────────────────────────────────────────────────────────
     # Use cached credentials if the platform hasn't assigned a unit yet
-    influx = initial_heartbeat if initial_heartbeat.get("influx_url") else load_influx_cache()
+    influx = initial_heartbeat if initial_heartbeat.get("influx_token") else load_influx_cache()
 
-    if not influx.get("influx_url"):
+    if not influx.get("influx_token"):
         log.warning(
             "Device not yet assigned to a unit in app.beyondbuildings.de. "
             "Telegraf will start once credentials are received."
@@ -289,7 +289,7 @@ def main() -> None:
                 return
 
             # Start telegraf on first credential arrival (deferred start)
-            if _telegraf_proc is None and heartbeat.get("influx_url"):
+            if _telegraf_proc is None and heartbeat.get("influx_token"):
                 log.info("InfluxDB credentials received — starting Telegraf")
                 render_telegraf_conf(options, heartbeat)
                 save_influx_cache(heartbeat)
