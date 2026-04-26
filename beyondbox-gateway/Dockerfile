@@ -1,18 +1,8 @@
+FROM telegraf:1.30 AS telegraf-binary
 FROM python:3.12-slim
 
-# Install telegraf from InfluxData apt repo
-RUN \
-    apt-get update && \
-    apt-get install -y --no-install-recommends curl gnupg jq && \
-    curl -fsSL https://repos.influxdata.com/influxdata-archive_compat.key \
-        | gpg --dearmor -o /etc/apt/trusted.gpg.d/influxdata.gpg && \
-    echo "deb https://repos.influxdata.com/debian stable main" \
-        > /etc/apt/sources.list.d/influxdata.list && \
-    apt-get update && \
-    apt-get install -y telegraf && \
-    apt-get remove -y curl gnupg && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+# Copy telegraf binary from official image (no apt repo setup needed)
+COPY --from=telegraf-binary /usr/bin/telegraf /usr/local/bin/telegraf
 
 WORKDIR /app
 
