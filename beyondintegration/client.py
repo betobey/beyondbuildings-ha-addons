@@ -91,15 +91,68 @@ def register(management_url: str, gateway_name: str) -> str:
 
 # ── Heartbeat ──────────────────────────────────────────────────────────────────
 
-def send_heartbeat(management_url: str, api_key: str) -> dict:
+def get_ha_states() -> list[dict]:
+    supervisor_token = os.environ.get("SUPERVISOR_TOKEN", "")
+    resp = requests.get(
+        "http://supervisor/core/api/states",
+        headers={"Authorization": f"Bearer {supervisor_token}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _extract_sensor_states(states: list[dict]) -> list[dict]:
+    """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring."""
+    _domains = {"sensor", "binary_sensor"}
+    result = []
+    for s in states:
+        entity_id = s.get("entity_id", "")
+        domain = entity_id.split(".")[0] if "." in entity_id else ""
+        if domain not in _domains:
+            continue
+
+        state_val = s.get("state", "")
+        connected = state_val not in ("unavailable", "unknown", "none", "")
+        attrs = s.get("attributes", {})
+
+        battery = attrs.get("battery_level") or attrs.get("battery")
+        if battery is not None:
+            try:
+                battery = int(float(battery))
+            except (ValueError, TypeError):
+                battery = None
+
+        linkquality = attrs.get("linkquality")
+        if linkquality is not None:
+            try:
+                linkquality = int(float(linkquality))
+            except (ValueError, TypeError):
+                linkquality = None
+
+        result.append({
+            "id":          entity_id,
+            "name":        attrs.get("friendly_name", entity_id),
+            "connected":   connected,
+            "battery":     battery,
+            "linkquality": linkquality,
+            "last_seen":   s.get("last_changed"),
+        })
+    return result
+
+
+def send_heartbeat(management_url: str, api_key: str, sensor_states: list | None = None) -> dict:
+    payload: dict = {
+        "firmware_version": "beyondintegration-1.0.0",
+        "ip_local":         get_local_ip(),
+        "uptime_seconds":   0,
+    }
+    if sensor_states is not None:
+        payload["sensor_states"] = sensor_states
     resp = requests.post(
         f"{management_url}/api/v1/devices/heartbeat",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "firmware_version": "beyondintegration-1.0.0",
-            "ip_local":         get_local_ip(),
-            "uptime_seconds":   0,
-        },
+        json=payload,
         timeout=15,
     )
     resp.raise_for_status()
@@ -232,7 +285,12 @@ def main() -> None:
     while True:
         time.sleep(HEARTBEAT_INTERVAL)
         try:
-            heartbeat = send_heartbeat(management_url, api_key)
+            sensor_states = None
+            try:
+                sensor_states = _extract_sensor_states(get_ha_states())
+            except Exception as e:
+                log.warning("Sensor states konnten nicht gelesen werden: %s", e)
+            heartbeat = send_heartbeat(management_url, api_key, sensor_states=sensor_states)
             log.info("Heartbeat OK — status=%s", heartbeat.get("status"))
 
             if heartbeat.get("status") == "revoked":

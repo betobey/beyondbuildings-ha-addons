@@ -89,15 +89,62 @@ def register(management_url: str, gateway_name: str) -> str:
 
 # ── Heartbeat ──────────────────────────────────────────────────────────────────
 
-def send_heartbeat(management_url: str, api_key: str) -> dict:
+def _extract_sensor_states(
+    states: list[dict],
+    include_domains: list[str],
+    include_entities: list[str],
+) -> list[dict]:
+    """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring."""
+    result = []
+    for s in states:
+        entity_id = s.get("entity_id", "")
+        domain = entity_id.split(".")[0] if "." in entity_id else ""
+        if domain not in include_domains:
+            continue
+        if include_entities and entity_id not in include_entities:
+            continue
+
+        state_val = s.get("state", "")
+        connected = state_val not in ("unavailable", "unknown", "none", "")
+        attrs = s.get("attributes", {})
+
+        battery = attrs.get("battery_level") or attrs.get("battery")
+        if battery is not None:
+            try:
+                battery = int(float(battery))
+            except (ValueError, TypeError):
+                battery = None
+
+        linkquality = attrs.get("linkquality")
+        if linkquality is not None:
+            try:
+                linkquality = int(float(linkquality))
+            except (ValueError, TypeError):
+                linkquality = None
+
+        result.append({
+            "id":          entity_id,
+            "name":        attrs.get("friendly_name", entity_id),
+            "connected":   connected,
+            "battery":     battery,
+            "linkquality": linkquality,
+            "last_seen":   s.get("last_changed"),
+        })
+    return result
+
+
+def send_heartbeat(management_url: str, api_key: str, sensor_states: list | None = None) -> dict:
+    payload: dict = {
+        "firmware_version": "beyondintegration-zha-1.0.0",
+        "ip_local":         get_local_ip(),
+        "uptime_seconds":   0,
+    }
+    if sensor_states is not None:
+        payload["sensor_states"] = sensor_states
     resp = requests.post(
         f"{management_url}/api/v1/devices/heartbeat",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "firmware_version": "beyondintegration-zha-1.0.0",
-            "ip_local":         get_local_ip(),
-            "uptime_seconds":   0,
-        },
+        json=payload,
         timeout=15,
     )
     resp.raise_for_status()
@@ -245,6 +292,7 @@ def main() -> None:
     # ── Poll loop ─────────────────────────────────────────────────────────────
     log.info("Poll loop running (interval: %ds)", poll_interval)
     heartbeat_counter = 0
+    cached_sensor_states: list | None = None
 
     while True:
         try:
@@ -255,7 +303,10 @@ def main() -> None:
                 write_to_influx(points, influx)
             else:
                 log.warning("No matching states found")
-
+            # States für nächsten Heartbeat cachen
+            cached_sensor_states = _extract_sensor_states(
+                states, include_domains, include_entities
+            )
         except Exception as e:
             log.error("Poll error: %s", e)
 
@@ -264,7 +315,7 @@ def main() -> None:
         if heartbeat_counter >= 5:
             heartbeat_counter = 0
             try:
-                hb = send_heartbeat(management_url, api_key)
+                hb = send_heartbeat(management_url, api_key, sensor_states=cached_sensor_states)
                 log.info("Heartbeat OK — status=%s", hb.get("status"))
 
                 if hb.get("status") == "revoked":
