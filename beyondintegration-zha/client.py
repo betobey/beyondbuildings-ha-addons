@@ -320,6 +320,11 @@ def main() -> None:
                     "influx_org":    hb.get("influx_org", "beyondbuildings"),
                     "influx_bucket": hb["influx_bucket"],
                 }
+                # Entitäten aus Raumkonfiguration übernehmen (Whitelist vom Backend)
+                server_entities = hb.get("configured_entity_ids", [])
+                if server_entities:
+                    include_entities = server_entities
+                    log.info("Entity whitelist from backend: %d entities", len(include_entities))
                 log.info("InfluxDB v2 credentials received — url=%s bucket=%s",
                          influx["influx_url"], influx["influx_bucket"])
             else:
@@ -370,6 +375,12 @@ def main() -> None:
                     if hb.get("influx_v2_url"):
                         influx["influx_url"] = hb["influx_v2_url"]
                     log.info("InfluxDB credentials updated")
+
+                # Entity-Whitelist aktualisieren falls Backend neue Liste sendet
+                server_entities = hb.get("configured_entity_ids", [])
+                if server_entities and server_entities != include_entities:
+                    include_entities = server_entities
+                    log.info("Entity whitelist updated: %d entities", len(include_entities))
 
             except requests.HTTPError as e:
                 if e.response is not None and e.response.status_code == 401:
