@@ -102,9 +102,44 @@ def get_ha_states() -> list[dict]:
     return resp.json()
 
 
+def _get_entity_device_info() -> dict[str, dict]:
+    """Gibt dict zurück: entity_id → {manufacturer, model} aus HA Device Registry."""
+    supervisor_token = os.environ.get("SUPERVISOR_TOKEN", "")
+    headers = {"Authorization": f"Bearer {supervisor_token}"}
+    try:
+        entity_resp = requests.get(
+            "http://supervisor/core/api/config/entity_registry/list",
+            headers=headers, timeout=10,
+        )
+        entity_resp.raise_for_status()
+        entity_list = entity_resp.json()
+
+        device_resp = requests.get(
+            "http://supervisor/core/api/config/device_registry/list",
+            headers=headers, timeout=10,
+        )
+        device_resp.raise_for_status()
+        device_list = device_resp.json()
+
+        devices = {d["id"]: d for d in device_list}
+        result = {}
+        for e in entity_list:
+            dev = devices.get(e.get("device_id", ""))
+            if dev:
+                result[e["entity_id"]] = {
+                    "manufacturer": dev.get("manufacturer"),
+                    "model":        dev.get("model"),
+                }
+        return result
+    except Exception as ex:
+        log.debug("Device Registry nicht verfügbar: %s", ex)
+        return {}
+
+
 def _extract_sensor_states(states: list[dict]) -> list[dict]:
     """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring."""
     _domains = {"sensor", "binary_sensor"}
+    device_info = _get_entity_device_info()
     result = []
     for s in states:
         entity_id = s.get("entity_id", "")
@@ -130,13 +165,16 @@ def _extract_sensor_states(states: list[dict]) -> list[dict]:
             except (ValueError, TypeError):
                 linkquality = None
 
+        dev = device_info.get(entity_id, {})
         result.append({
-            "id":          entity_id,
-            "name":        attrs.get("friendly_name", entity_id),
-            "connected":   connected,
-            "battery":     battery,
-            "linkquality": linkquality,
-            "last_seen":   s.get("last_changed"),
+            "id":           entity_id,
+            "name":         attrs.get("friendly_name", entity_id),
+            "connected":    connected,
+            "battery":      battery,
+            "linkquality":  linkquality,
+            "last_seen":    s.get("last_changed"),
+            "manufacturer": dev.get("manufacturer"),
+            "model":        dev.get("model"),
         })
     return result
 
