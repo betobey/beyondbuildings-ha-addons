@@ -172,16 +172,25 @@ def _extract_sensor_states(states: list[dict]) -> list[dict]:
                 linkquality = None
 
         dev = device_info.get(entity_id, {})
+        manufacturer = dev.get("manufacturer")
+        model = dev.get("model")
+        serial_number = dev.get("serial_number")
+
+        # Nur physische Hardware-Sensoren senden (keine HA-internen Entitäten)
+        has_hardware = any(v is not None for v in (manufacturer, model, serial_number, battery, linkquality))
+        if not has_hardware:
+            continue
+
         result.append({
             "id":            entity_id,
-            "name":          attrs.get("friendly_name", entity_id),
+            "name":          attrs.get("friendly_name") or entity_id,
             "connected":     connected,
             "battery":       battery,
             "linkquality":   linkquality,
             "last_seen":     s.get("last_changed"),
-            "manufacturer":  dev.get("manufacturer"),
-            "model":         dev.get("model"),
-            "serial_number": dev.get("serial_number"),
+            "manufacturer":  manufacturer,
+            "model":         model,
+            "serial_number": serial_number,
         })
     return result
 
