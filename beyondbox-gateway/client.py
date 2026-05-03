@@ -164,9 +164,15 @@ def _get_entity_device_info() -> dict[str, dict]:
         for e in entity_resp.json():
             dev = devices.get(e.get("device_id", ""))
             if dev:
+                serial_number = None
+                for conn_type, conn_id in (dev.get("connections") or []):
+                    if conn_type in ("zigbee", "zha"):
+                        serial_number = conn_id
+                        break
                 result[e["entity_id"]] = {
-                    "manufacturer": dev.get("manufacturer"),
-                    "model":        dev.get("model"),
+                    "manufacturer":  dev.get("manufacturer"),
+                    "model":         dev.get("model"),
+                    "serial_number": serial_number,
                 }
         return result
     except Exception as ex:
@@ -205,14 +211,15 @@ def _extract_sensor_states(states: list[dict]) -> list[dict]:
 
         dev = device_info.get(entity_id, {})
         result.append({
-            "id":           entity_id,
-            "name":         attrs.get("friendly_name", entity_id),
-            "connected":    connected,
-            "battery":      battery,
-            "linkquality":  linkquality,
-            "last_seen":    s.get("last_changed"),
-            "manufacturer": dev.get("manufacturer"),
-            "model":        dev.get("model"),
+            "id":            entity_id,
+            "name":          attrs.get("friendly_name", entity_id),
+            "connected":     connected,
+            "battery":       battery,
+            "linkquality":   linkquality,
+            "last_seen":     s.get("last_changed"),
+            "manufacturer":  dev.get("manufacturer"),
+            "model":         dev.get("model"),
+            "serial_number": dev.get("serial_number"),
         })
     return result
 
