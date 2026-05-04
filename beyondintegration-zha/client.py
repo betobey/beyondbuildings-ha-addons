@@ -163,9 +163,10 @@ def _extract_sensor_states(
         model = dev.get("model")
         serial_number = dev.get("serial_number")
 
-        # Nur physische Hardware-Sensoren senden (keine HA-internen Entitäten)
+        # Whitelisted entities immer senden; sonst nur physische Hardware-Sensoren
+        on_whitelist = bool(include_entities and entity_id in include_entities)
         has_hardware = any(v is not None for v in (manufacturer, model, serial_number, battery, linkquality))
-        if not has_hardware:
+        if not on_whitelist and not has_hardware:
             continue
 
         result.append({
