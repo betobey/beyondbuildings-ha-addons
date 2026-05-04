@@ -139,12 +139,17 @@ def _is_lqi_entity(eid: str) -> bool:
 
 
 def _base_of(eid: str, markers: tuple) -> str | None:
-    """Gibt den Basis-entity_id zurück, wenn eid eine Batterie/LQI-Entity ist."""
+    """Gibt den domain-freien Basisnamen zurück, wenn eid eine Batterie/LQI-Entity ist.
+
+    sensor.klima_kuche_batterie  → "klima_kuche"
+    sensor.fenster_bad_batterie  → "fenster_bad"
+    """
     eid_l = eid.lower()
     for m in markers:
         idx = eid_l.rfind(m)
         if idx != -1:
-            return eid[:idx]
+            full_base = eid[:idx]  # z.B. "sensor.klima_kuche"
+            return full_base.split(".", 1)[-1] if "." in full_base else full_base
     return None
 
 
@@ -155,47 +160,61 @@ def _extract_sensor_states(
 ) -> list[dict]:
     """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring.
 
-    ZHA erstellt separate Entities für Batterie (_batterie) und LQI (_lqi).
-    Pass 1 sammelt diese Werte nach Basis-entity_id.
-    Pass 2 baut die Sensor-Einträge, injiziert die Werte und überspringt
-    standalone Batterie/LQI-Rows.
+    ZHA erstellt pro physischem Gerät mehrere Entities (Temperatur, Luftfeuchtigkeit,
+    Druck, Öffnung...) plus separate Batterie (_batterie) und LQI (_lqi) Entities.
+
+    Pass 1: Battery/LQI nach domain-freiem Basisnamen einsammeln.
+            "sensor.klima_kuche_batterie" → key "klima_kuche"
+    Pass 2: Pro Gerät (= Battery-Base) genau EINE Zeile.
+            Domain-freier Match: "binary_sensor.fenster_bad_offnung" → base "fenster_bad" ✓
+            Deduplizierung: weitere Entities desselben Geräts (Druck, Temp, etc.) werden übersprungen.
+            Anzeigename vom Battery-Entity abgeleitet ("Klima Küche" statt "Klima Küche Temperatur").
+    Pass 3: Battery/LQI ohne Hauptsensor → eigene Zeile (Gerät hat keine Mess-Entity).
     """
     device_info = _get_entity_device_info()
 
-    # Pass 1 — Batterie- und LQI-Werte nach Basis-entity_id einsammeln
-    battery_by_base: dict[str, int] = {}
-    lqi_by_base: dict[str, int] = {}
+    # Pass 1 — Battery/LQI nach domain-freiem Basisnamen
+    battery_by_base: dict[str, int] = {}  # "klima_kuche" → 30
+    lqi_by_base: dict[str, int] = {}      # "klima_kuche" → 100
+    display_by_base: dict[str, str] = {}  # "klima_kuche" → "Klima Küche"
+
     for s in states:
         eid = s.get("entity_id", "")
         val = s.get("state", "")
-        base = _base_of(eid, _BATT_MARKERS)
-        if base is not None:
+        attrs = s.get("attributes", {})
+
+        base_name = _base_of(eid, _BATT_MARKERS)
+        if base_name is not None:
             try:
-                battery_by_base[base] = int(float(val))
+                battery_by_base[base_name] = int(float(val))
             except (ValueError, TypeError):
                 pass
+            # Display-Name: friendly_name ohne " Batterie"/" Battery"-Suffix
+            fn = attrs.get("friendly_name", "")
+            for sfx in (" Batterie", " Battery"):
+                if fn.endswith(sfx):
+                    fn = fn[:-len(sfx)]
+                    break
+            display_by_base[base_name] = fn or base_name.replace("_", " ").title()
             continue
-        base = _base_of(eid, _LQI_MARKERS)
-        if base is not None:
+
+        base_name = _base_of(eid, _LQI_MARKERS)
+        if base_name is not None:
             try:
-                lqi_by_base[base] = int(float(val))
+                lqi_by_base[base_name] = int(float(val))
             except (ValueError, TypeError):
                 pass
 
-    def _lookup_and_mark(entity_id: str, table: dict, matched: set) -> int | None:
-        """Findet Wert für entity_id in table und markiert die Base als gematcht."""
+    def _find_base(name_part: str, table: dict) -> tuple[str | None, int | None]:
+        """Prefix-Match auf domain-freiem name_part → (base_name, value)."""
         for base, val in table.items():
-            if entity_id == base or entity_id.startswith(base + "_"):
-                matched.add(base)
-                return val
-        return None
+            if name_part == base or name_part.startswith(base + "_"):
+                return base, val
+        return None, None
 
-    # Pass 2 — Hauptentitäten verarbeiten, Battery/LQI injizieren
+    # Pass 2 — eine Zeile pro physischem Gerät
     result = []
-    matched_batt_bases: set = set()
-    matched_lqi_bases: set = set()
-
-    # States als dict für Pass 3 (schneller Zugriff nach entity_id)
+    used_bases: set[str] = set()
     states_by_id = {s.get("entity_id", ""): s for s in states}
 
     for s in states:
@@ -205,49 +224,55 @@ def _extract_sensor_states(
             continue
         if include_entities and entity_id not in include_entities:
             continue
-
-        # Standalone Batterie/LQI-Entities in Pass 2 überspringen — werden in Pass 3 behandelt
         if _is_batt_entity(entity_id) or _is_lqi_entity(entity_id):
             continue
 
+        # Domain-freier Name für Prefix-Match (z.B. "fenster_bad_offnung")
+        name_part = entity_id.split(".", 1)[-1] if "." in entity_id else entity_id
         state_val = s.get("state", "")
         connected = state_val not in ("unavailable", "unknown", "none", "")
         attrs = s.get("attributes", {})
 
-        # Batterie: erst aus Attributen, dann aus dedizierter _batterie-Entity
+        # Battery: aus Attributen oder dedizierter Entity (domain-frei gematcht)
         battery = attrs.get("battery_level") or attrs.get("battery")
         if battery is not None:
-            try:
-                battery = int(float(battery))
-            except (ValueError, TypeError):
-                battery = None
-        if battery is None:
-            battery = _lookup_and_mark(entity_id, battery_by_base, matched_batt_bases)
+            try: battery = int(float(battery))
+            except (ValueError, TypeError): battery = None
 
-        # LQI: erst aus Attributen, dann aus dedizierter _lqi-Entity
+        batt_base = None
+        if battery is None:
+            batt_base, battery = _find_base(name_part, battery_by_base)
+
+        # LQI: aus Attributen oder dedizierter Entity
         linkquality = attrs.get("linkquality")
         if linkquality is not None:
-            try:
-                linkquality = int(float(linkquality))
-            except (ValueError, TypeError):
-                linkquality = None
+            try: linkquality = int(float(linkquality))
+            except (ValueError, TypeError): linkquality = None
         if linkquality is None:
-            linkquality = _lookup_and_mark(entity_id, lqi_by_base, matched_lqi_bases)
+            _, linkquality = _find_base(name_part, lqi_by_base)
 
         dev = device_info.get(entity_id, {})
         manufacturer = dev.get("manufacturer")
         model = dev.get("model")
         serial_number = dev.get("serial_number")
 
-        # Whitelisted entities immer senden; sonst nur physische Hardware-Sensoren
         on_whitelist = bool(include_entities and entity_id in include_entities)
         has_hardware = any(v is not None for v in (manufacturer, model, serial_number, battery, linkquality))
         if not on_whitelist and not has_hardware:
             continue
 
+        # Deduplizierung: pro Battery-Base nur eine Zeile
+        if batt_base is not None:
+            if batt_base in used_bases:
+                continue  # weiteres Entity desselben Geräts überspringen
+            used_bases.add(batt_base)
+            display_name = display_by_base.get(batt_base, attrs.get("friendly_name") or entity_id)
+        else:
+            display_name = attrs.get("friendly_name") or entity_id
+
         result.append({
             "id":            entity_id,
-            "name":          attrs.get("friendly_name") or entity_id,
+            "name":          display_name,
             "connected":     connected,
             "battery":       battery,
             "linkquality":   linkquality,
@@ -257,14 +282,16 @@ def _extract_sensor_states(
             "serial_number": serial_number,
         })
 
-    # Pass 3 — Batterie/LQI-Entities ohne gematchten Hauptsensor als eigene Zeile anzeigen
-    # (Geräte die nur eine Batterie-Entity haben, z.B. reine Batterie-Monitore)
-    unmatched_bases: set = (set(battery_by_base) | set(lqi_by_base)) - matched_batt_bases - matched_lqi_bases
-    for base in unmatched_bases:
-        # Batterie-Entity bevorzugen, sonst LQI-Entity als Repräsentant
-        batt_eid = next((e for m in _BATT_MARKERS for e in states_by_id if e.lower().rfind(m) != -1 and _base_of(e, _BATT_MARKERS) == base), None)
-        lqi_eid  = next((e for m in _LQI_MARKERS  for e in states_by_id if e.lower().rfind(m) != -1 and _base_of(e, _LQI_MARKERS)  == base), None)
-        rep_eid  = batt_eid or lqi_eid
+    # Pass 3 — Battery/LQI ohne gematchten Hauptsensor → eigene Zeile
+    unmatched_bases = (set(battery_by_base) | set(lqi_by_base)) - used_bases
+    for base_name in unmatched_bases:
+        rep_eid = next(
+            (e for e in states_by_id if _base_of(e, _BATT_MARKERS) == base_name), None
+        )
+        if rep_eid is None:
+            rep_eid = next(
+                (e for e in states_by_id if _base_of(e, _LQI_MARKERS) == base_name), None
+            )
         if not rep_eid:
             continue
         if include_entities and rep_eid not in include_entities:
@@ -274,16 +301,13 @@ def _extract_sensor_states(
         attrs = s.get("attributes", {})
         state_val = s.get("state", "")
         connected = state_val not in ("unavailable", "unknown", "none", "")
-        # Anzeigename: Basis-Teil des entity_id (ohne Domain und Marker-Suffix)
-        base_name = base.split(".", 1)[-1].replace("_", " ").title() if "." in base else base.replace("_", " ").title()
-        friendly = attrs.get("friendly_name") or base_name
 
         result.append({
             "id":            rep_eid,
-            "name":          friendly,
+            "name":          display_by_base.get(base_name, base_name.replace("_", " ").title()),
             "connected":     connected,
-            "battery":       battery_by_base.get(base),
-            "linkquality":   lqi_by_base.get(base),
+            "battery":       battery_by_base.get(base_name),
+            "linkquality":   lqi_by_base.get(base_name),
             "last_seen":     s.get("last_changed"),
             "manufacturer":  None,
             "model":         None,

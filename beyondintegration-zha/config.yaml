@@ -3,7 +3,7 @@ description: >
   Verbindet ZHA/native HA-Sensoren mit der BeyondBox-Plattform.
   Liest States direkt aus Home Assistant und schreibt sie in InfluxDB 2.
   Für Wohnungen die ZHA oder andere native HA-Integrationen nutzen (kein Zigbee2MQTT).
-version: "1.0.10"
+version: "1.0.11"
 slug: "beyondintegration_zha"
 init: false
 run_as_root: true
