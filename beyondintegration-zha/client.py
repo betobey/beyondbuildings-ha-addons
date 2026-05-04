@@ -182,15 +182,22 @@ def _extract_sensor_states(
             except (ValueError, TypeError):
                 pass
 
-    def _lookup(entity_id: str, table: dict) -> int | None:
-        """Findet Wert für entity_id in table (Basis-Prefix-Match)."""
+    def _lookup_and_mark(entity_id: str, table: dict, matched: set) -> int | None:
+        """Findet Wert für entity_id in table und markiert die Base als gematcht."""
         for base, val in table.items():
             if entity_id == base or entity_id.startswith(base + "_"):
+                matched.add(base)
                 return val
         return None
 
-    # Pass 2 — Sensor-Einträge bauen
+    # Pass 2 — Hauptentitäten verarbeiten, Battery/LQI injizieren
     result = []
+    matched_batt_bases: set = set()
+    matched_lqi_bases: set = set()
+
+    # States als dict für Pass 3 (schneller Zugriff nach entity_id)
+    states_by_id = {s.get("entity_id", ""): s for s in states}
+
     for s in states:
         entity_id = s.get("entity_id", "")
         domain = entity_id.split(".")[0] if "." in entity_id else ""
@@ -199,7 +206,7 @@ def _extract_sensor_states(
         if include_entities and entity_id not in include_entities:
             continue
 
-        # Standalone Batterie/LQI-Entities überspringen — Werte wurden in Pass 1 gesammelt
+        # Standalone Batterie/LQI-Entities in Pass 2 überspringen — werden in Pass 3 behandelt
         if _is_batt_entity(entity_id) or _is_lqi_entity(entity_id):
             continue
 
@@ -215,7 +222,7 @@ def _extract_sensor_states(
             except (ValueError, TypeError):
                 battery = None
         if battery is None:
-            battery = _lookup(entity_id, battery_by_base)
+            battery = _lookup_and_mark(entity_id, battery_by_base, matched_batt_bases)
 
         # LQI: erst aus Attributen, dann aus dedizierter _lqi-Entity
         linkquality = attrs.get("linkquality")
@@ -225,7 +232,7 @@ def _extract_sensor_states(
             except (ValueError, TypeError):
                 linkquality = None
         if linkquality is None:
-            linkquality = _lookup(entity_id, lqi_by_base)
+            linkquality = _lookup_and_mark(entity_id, lqi_by_base, matched_lqi_bases)
 
         dev = device_info.get(entity_id, {})
         manufacturer = dev.get("manufacturer")
@@ -249,6 +256,40 @@ def _extract_sensor_states(
             "model":         model,
             "serial_number": serial_number,
         })
+
+    # Pass 3 — Batterie/LQI-Entities ohne gematchten Hauptsensor als eigene Zeile anzeigen
+    # (Geräte die nur eine Batterie-Entity haben, z.B. reine Batterie-Monitore)
+    unmatched_bases: set = (set(battery_by_base) | set(lqi_by_base)) - matched_batt_bases - matched_lqi_bases
+    for base in unmatched_bases:
+        # Batterie-Entity bevorzugen, sonst LQI-Entity als Repräsentant
+        batt_eid = next((e for m in _BATT_MARKERS for e in states_by_id if e.lower().rfind(m) != -1 and _base_of(e, _BATT_MARKERS) == base), None)
+        lqi_eid  = next((e for m in _LQI_MARKERS  for e in states_by_id if e.lower().rfind(m) != -1 and _base_of(e, _LQI_MARKERS)  == base), None)
+        rep_eid  = batt_eid or lqi_eid
+        if not rep_eid:
+            continue
+        if include_entities and rep_eid not in include_entities:
+            continue
+
+        s = states_by_id[rep_eid]
+        attrs = s.get("attributes", {})
+        state_val = s.get("state", "")
+        connected = state_val not in ("unavailable", "unknown", "none", "")
+        # Anzeigename: Basis-Teil des entity_id (ohne Domain und Marker-Suffix)
+        base_name = base.split(".", 1)[-1].replace("_", " ").title() if "." in base else base.replace("_", " ").title()
+        friendly = attrs.get("friendly_name") or base_name
+
+        result.append({
+            "id":            rep_eid,
+            "name":          friendly,
+            "connected":     connected,
+            "battery":       battery_by_base.get(base),
+            "linkquality":   lqi_by_base.get(base),
+            "last_seen":     s.get("last_changed"),
+            "manufacturer":  None,
+            "model":         None,
+            "serial_number": None,
+        })
+
     return result
 
 
