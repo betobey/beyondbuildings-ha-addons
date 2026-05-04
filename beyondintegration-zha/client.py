@@ -124,13 +124,72 @@ def _get_entity_device_info() -> dict[str, dict]:
         return {}
 
 
+_BATT_MARKERS = ("_batterie", "_battery")
+_LQI_MARKERS  = ("_lqi",)
+
+
+def _is_batt_entity(eid: str) -> bool:
+    eid_l = eid.lower()
+    return any(eid_l.rfind(m) != -1 for m in _BATT_MARKERS)
+
+
+def _is_lqi_entity(eid: str) -> bool:
+    eid_l = eid.lower()
+    return any(eid_l.rfind(m) != -1 for m in _LQI_MARKERS)
+
+
+def _base_of(eid: str, markers: tuple) -> str | None:
+    """Gibt den Basis-entity_id zurück, wenn eid eine Batterie/LQI-Entity ist."""
+    eid_l = eid.lower()
+    for m in markers:
+        idx = eid_l.rfind(m)
+        if idx != -1:
+            return eid[:idx]
+    return None
+
+
 def _extract_sensor_states(
     states: list[dict],
     include_domains: list[str],
     include_entities: list[str],
 ) -> list[dict]:
-    """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring."""
+    """Extrahiert Sensor-Konnektivität aus HA States für das Heartbeat-Monitoring.
+
+    ZHA erstellt separate Entities für Batterie (_batterie) und LQI (_lqi).
+    Pass 1 sammelt diese Werte nach Basis-entity_id.
+    Pass 2 baut die Sensor-Einträge, injiziert die Werte und überspringt
+    standalone Batterie/LQI-Rows.
+    """
     device_info = _get_entity_device_info()
+
+    # Pass 1 — Batterie- und LQI-Werte nach Basis-entity_id einsammeln
+    battery_by_base: dict[str, int] = {}
+    lqi_by_base: dict[str, int] = {}
+    for s in states:
+        eid = s.get("entity_id", "")
+        val = s.get("state", "")
+        base = _base_of(eid, _BATT_MARKERS)
+        if base is not None:
+            try:
+                battery_by_base[base] = int(float(val))
+            except (ValueError, TypeError):
+                pass
+            continue
+        base = _base_of(eid, _LQI_MARKERS)
+        if base is not None:
+            try:
+                lqi_by_base[base] = int(float(val))
+            except (ValueError, TypeError):
+                pass
+
+    def _lookup(entity_id: str, table: dict) -> int | None:
+        """Findet Wert für entity_id in table (Basis-Prefix-Match)."""
+        for base, val in table.items():
+            if entity_id == base or entity_id.startswith(base + "_"):
+                return val
+        return None
+
+    # Pass 2 — Sensor-Einträge bauen
     result = []
     for s in states:
         entity_id = s.get("entity_id", "")
@@ -140,23 +199,33 @@ def _extract_sensor_states(
         if include_entities and entity_id not in include_entities:
             continue
 
+        # Standalone Batterie/LQI-Entities überspringen — Werte wurden in Pass 1 gesammelt
+        if _is_batt_entity(entity_id) or _is_lqi_entity(entity_id):
+            continue
+
         state_val = s.get("state", "")
         connected = state_val not in ("unavailable", "unknown", "none", "")
         attrs = s.get("attributes", {})
 
+        # Batterie: erst aus Attributen, dann aus dedizierter _batterie-Entity
         battery = attrs.get("battery_level") or attrs.get("battery")
         if battery is not None:
             try:
                 battery = int(float(battery))
             except (ValueError, TypeError):
                 battery = None
+        if battery is None:
+            battery = _lookup(entity_id, battery_by_base)
 
+        # LQI: erst aus Attributen, dann aus dedizierter _lqi-Entity
         linkquality = attrs.get("linkquality")
         if linkquality is not None:
             try:
                 linkquality = int(float(linkquality))
             except (ValueError, TypeError):
                 linkquality = None
+        if linkquality is None:
+            linkquality = _lookup(entity_id, lqi_by_base)
 
         dev = device_info.get(entity_id, {})
         manufacturer = dev.get("manufacturer")
