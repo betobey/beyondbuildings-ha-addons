@@ -348,10 +348,24 @@ def main() -> None:
     log.info("Poll loop running (interval: %ds)", poll_interval)
     heartbeat_counter = 0
     cached_sensor_states: list | None = None
+    _battery_lqi_logged = False
 
     while True:
         try:
             states = get_ha_states()
+
+            # Einmalig alle Batterie/LQI-Entities loggen (Discovery)
+            if not _battery_lqi_logged:
+                _kw = ("batter", "lqi", "akkustand", "signal")
+                found = sorted(
+                    s["entity_id"] for s in states
+                    if s.get("entity_id", "").split(".")[0] == "sensor"
+                    and any(k in s["entity_id"].lower() for k in _kw)
+                )
+                log.info("DISCOVERY — Batterie/LQI-Entities in HA (%d):\n%s",
+                         len(found), "\n".join(found) if found else "(keine gefunden)")
+                _battery_lqi_logged = True
+
             points = states_to_points(states, include_domains, exclude_entities,
                                       include_entities, influx["influx_bucket"], gateway_name)
             if points:
